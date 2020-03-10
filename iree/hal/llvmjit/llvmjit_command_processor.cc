@@ -39,34 +39,13 @@ LLVMJITCommandProcessor::LLVMJITCommandProcessor(
 
 LLVMJITCommandProcessor::~LLVMJITCommandProcessor() = default;
 
-Status LLVMJITCommandProcessor::Dispatch(
-    const DispatchRequest& dispatch_request) {
-  IREE_TRACE_SCOPE0("LLVMJITCommandProcessor::Dispatch");
-  auto* executable =
-      static_cast<LLVMJITExecutable*>(dispatch_request.executable);
-
-  std::vector<UnrankedMemRefType<uint32_t>*> descriptors(
-      dispatch_request.bindings.size());
-  llvm::SmallVector<void*, 4> args(dispatch_request.bindings.size());
-  for (size_t i = 0; i < dispatch_request.bindings.size(); ++i) {
-    ASSIGN_OR_RETURN(
-        auto memory,
-        dispatch_request.bindings.at(i).buffer->MapMemory<uint32_t>(
-            MemoryAccessBitfield::kWrite));
-    auto data = memory.mutable_data();
-    const std::vector<int64_t> shape(
-        dispatch_request.bindings.at(i).shape.begin(),
-        dispatch_request.bindings.at(i).shape.end());
-    descriptors[i] = allocUnrankedDescriptor<uint32_t>(data, shape);
-    args[i] = &descriptors[i]->descriptor;
-  }
-  auto status = executable->Invoke(dispatch_request.entry_point, args);
-
-  for (int i = 0; i < descriptors.size(); ++i) {
-    freeUnrankedDescriptor(descriptors[i]);
-  }
-
-  return status;
+Status LLVMJITCommandProcessor::DispatchInline(
+    Executable* executable, int32_t entry_point,
+    std::array<uint32_t, 3> workgroups, const PushConstantBlock& push_constants,
+    absl::Span<const absl::Span<const DescriptorSet::Binding>> set_bindings) {
+  IREE_TRACE_SCOPE0("LLVMJITCommandProcessor::DispatchInline");
+  // TODO(ataei): implement new descriptor set bindings.
+  return OkStatus();
 }
 }  // namespace llvmjit
 }  // namespace hal
