@@ -23,7 +23,6 @@
 #include "iree/compiler/Dialect/Vulkan/Utils/TargetEnvUtils.h"
 #include "iree/compiler/Translation/CodegenPasses/Passes.h"
 #include "iree/compiler/Translation/CodegenUtils/CodegenUtils.h"
-#include "iree/compiler/Translation/SPIRV/EmbeddedKernels/EmbeddedKernels.h"
 #include "iree/compiler/Translation/SPIRV/LinalgToSPIRV/LowerToSPIRV.h"
 #include "iree/compiler/Translation/SPIRV/XLAToSPIRV/IREEToSPIRVPass.h"
 #include "iree/schemas/spirv_executable_def_generated.h"
@@ -259,71 +258,62 @@ LogicalResult translateToVulkanSPIRVExecutable(
       getSPIRVTargetEnv(targetOptions.vulkanTargetEnv, moduleOp.getContext());
   moduleOp.setAttr(spirv::getTargetEnvAttrName(), spvTargetEnv);
 
-  // Try first to match against an embedded kernel (such as matmul) and
-  // otherwise fall back to generating the kernel.
+  // The sequencer and runtime use ordinals instead of names. We provide the
+  // list of entry point names here that are then passed in
+  // VkShaderModuleCreateInfo.
   iree::SpirVExecutableDefT spirvExecutableDef;
-  if (tryEmbeddedKernelRewrite(moduleOp, &spirvExecutableDef)) {
-    // Strip out the contents as we don't care (they were manually replaced).
-    moduleOp.getBody()->getOperations().erase(
-        moduleOp.getBody()->getOperations().begin(),
-        --moduleOp.getBody()->getOperations().end());
+  spirvExecutableDef.entry_points = populateEntryPointNames(flowExecutableOp);
+
+  // Lower module to spirv::ModuleOp.
+  PassManager conversionPassManager(moduleOp.getContext());
+  if (useLinalgPath(moduleOp, targetOptions)) {
+    addHLOToLinalgToSPIRVPasses(conversionPassManager,
+                                targetOptions.linalgToSPIRVWorkgroupSize);
   } else {
-    // The sequencer and runtime use ordinals instead of names. We provide the
-    // list of entry point names here that are then passed in
-    // VkShaderModuleCreateInfo.
-    spirvExecutableDef.entry_points = populateEntryPointNames(flowExecutableOp);
+    // Use the Index computation path as fallback.
+    addIREEToSPIRVPasses(conversionPassManager);
+  }
+  if (failed(conversionPassManager.run(moduleOp))) {
+    return moduleOp.emitError() << "failed to run conversion passes";
+  }
 
-    // Lower module to spirv::ModuleOp.
-    PassManager conversionPassManager(moduleOp.getContext());
-    if (useLinalgPath(moduleOp, targetOptions)) {
-      addHLOToLinalgToSPIRVPasses(conversionPassManager,
-                                  targetOptions.linalgToSPIRVWorkgroupSize);
-    } else {
-      // Use the Index computation path as fallback.
-      addIREEToSPIRVPasses(conversionPassManager);
-    }
-    if (failed(conversionPassManager.run(moduleOp))) {
-      return moduleOp.emitError() << "failed to run conversion passes";
-    }
+  // Drop the gpu.container_module attribute.
+  moduleOp.removeAttr("gpu.container_module");
+  propagateModifiedExecutableABI(flowExecutableOp, moduleOp, executableOp);
+  auto spvModuleOps = moduleOp.getOps<spirv::ModuleOp>();
+  if (std::distance(spvModuleOps.begin(), spvModuleOps.end()) != 1) {
+    return moduleOp.emitError()
+           << "Expected a single spv.module for an IREE executable op";
+  }
+  spirv::ModuleOp spvModuleOp = *spvModuleOps.begin();
 
-    // Drop the gpu.container_module attribute.
-    moduleOp.removeAttr("gpu.container_module");
-    propagateModifiedExecutableABI(flowExecutableOp, moduleOp, executableOp);
-    auto spvModuleOps = moduleOp.getOps<spirv::ModuleOp>();
-    if (std::distance(spvModuleOps.begin(), spvModuleOps.end()) != 1) {
-      return moduleOp.emitError()
-             << "Expected a single spv.module for an IREE executable op";
-    }
-    spirv::ModuleOp spvModuleOp = *spvModuleOps.begin();
+  // Serialize the spirv::ModuleOp into the binary that we will embed in the
+  // final flatbuffer.
+  SmallVector<uint32_t, 256> spvBinary;
+  if (failed(spirv::serialize(spvModuleOp, spvBinary))) {
+    return spvModuleOp.emitError() << "failed to serialize spv.module";
+  }
+  spirvExecutableDef.code = {spvBinary.begin(), spvBinary.end()};
+  if (spirvExecutableDef.code.empty()) {
+    return spvModuleOp.emitError()
+           << "failed to translate and serialize SPIR-V executable";
+  }
 
-    // Serialize the spirv::ModuleOp into the binary that we will embed in the
-    // final flatbuffer.
-    SmallVector<uint32_t, 256> spvBinary;
-    if (failed(spirv::serialize(spvModuleOp, spvBinary))) {
-      return spvModuleOp.emitError() << "failed to serialize spv.module";
-    }
-    spirvExecutableDef.code = {spvBinary.begin(), spvBinary.end()};
-    if (spirvExecutableDef.code.empty()) {
-      return spvModuleOp.emitError()
-             << "failed to translate and serialize SPIR-V executable";
-    }
+  // Reflect against the entry thunk to identify the required pipeline
+  // layout based on binding information. This is used by the runtime to
+  // create the VkPipelineLayout.
+  spirvExecutableDef.pipeline_layout = populatePipelineLayout(spvModuleOp);
+  if (!spirvExecutableDef.pipeline_layout) {
+    return spvModuleOp.emitError()
+           << "failed to generate pipeline for SPIR-V module";
+  }
 
-    // Reflect against the entry thunk to identify the required pipeline
-    // layout based on binding information. This is used by the runtime to
-    // create the VkPipelineLayout.
-    spirvExecutableDef.pipeline_layout = populatePipelineLayout(spvModuleOp);
-    if (!spirvExecutableDef.pipeline_layout) {
-      return spvModuleOp.emitError()
-             << "failed to generate pipeline for SPIR-V module";
-    }
-
-    // Remove the original functions as we just want to keep the spv.module for
-    // debugging.
-    for (auto &op :
-         llvm::make_early_inc_range(moduleOp.getBody()->getOperations())) {
-      if (!isa<spirv::ModuleOp>(op) && !isa<ModuleTerminatorOp>(op)) {
-        op.erase();
-      }
+  // Remove the original functions as we just want to keep the spv.module for
+  // debugging.
+  for (auto &op :
+       llvm::make_early_inc_range(moduleOp.getBody()->getOperations())) {
+    if (!isa<spirv::ModuleOp>(op) && !isa<ModuleTerminatorOp>(op)) {
+      op.erase();
     }
   }
 
