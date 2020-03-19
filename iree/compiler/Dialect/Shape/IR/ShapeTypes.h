@@ -41,7 +41,7 @@ class RankedShapeType : public Type::TypeBase<RankedShapeType, Type,
 
   /// Support method to enable LLVM-style type casting.
   static bool kindof(unsigned kind) {
-    return kind == IREE::Shape::TypeKind::RankedShape;
+    return kind == Shape::TypeKind::RankedShape;
   }
 
   // Gets an instance of a RankedShapeType given an array of dimensions and

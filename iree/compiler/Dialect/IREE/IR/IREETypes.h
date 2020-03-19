@@ -47,6 +47,17 @@ enum Kind {
 };
 }  // namespace TypeKind
 
+}  // namespace IREE
+
+namespace Shape {
+namespace TypeKind {
+enum Kind {
+  RankedShape = IREE::TypeKind::FIRST_SHAPE_TYPE,
+};
+}  // namespace TypeKind
+}  // namespace Shape
+
+namespace IREE {
 namespace HAL {
 namespace TypeKind {
 enum Kind {
@@ -78,14 +89,6 @@ enum Kind {
 };
 }  // namespace TypeKind
 }  // namespace SEQ
-
-namespace Shape {
-namespace TypeKind {
-enum Kind {
-  RankedShape = IREE::TypeKind::FIRST_SHAPE_TYPE,
-};
-}  // namespace TypeKind
-}  // namespace Shape
 
 namespace Strings {
 namespace TypeKind {
