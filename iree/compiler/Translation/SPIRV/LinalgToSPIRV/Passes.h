@@ -23,6 +23,9 @@ namespace iree_compiler {
 /// Pass to get gpu.module from a gpu.launch operation.
 std::unique_ptr<OpPassBase<ModuleOp>> createIREEGpuKernelOutliningPass();
 
+/// Pass to tile and fuse linalg operations on buffers.
+std::unique_ptr<OpPassBase<FuncOp>> createLinalgTileAndFusePass();
+
 }  // namespace iree_compiler
 }  // namespace mlir
 

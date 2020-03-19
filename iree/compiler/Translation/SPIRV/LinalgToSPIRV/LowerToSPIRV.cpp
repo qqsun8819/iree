@@ -23,6 +23,7 @@
 #include "iree/compiler/Translation/CodegenPasses/Passes.h"
 #include "iree/compiler/Translation/CodegenUtils/CodegenUtils.h"
 #include "iree/compiler/Translation/SPIRV/LinalgToSPIRV/Passes.h"
+#include "iree/compiler/Translation/SPIRV/LinalgToSPIRV/Utils.h"
 #include "mlir/Conversion/GPUToSPIRV/ConvertGPUToSPIRV.h"
 #include "mlir/Conversion/LoopsToGPU/LoopsToGPU.h"
 #include "mlir/Conversion/StandardToSPIRV/ConvertStandardToSPIRV.h"
@@ -88,20 +89,6 @@ static void createConstantsInFunc(FuncOp funcOp, ArrayRef<int64_t> intVal,
   }
 }
 
-/// Gets the number of outer parallel loops in a linalg operation.
-unsigned getNumOuterParallelLoops(linalg::LinalgOp linalgOp) {
-  // Find the number of leading parallel loops in the generic op
-  unsigned numOuterParallelLoops = 0;
-  for (auto iteratorType : linalgOp.iterator_types()) {
-    if (iteratorType.cast<StringAttr>().getValue() !=
-        getParallelIteratorTypeName()) {
-      break;
-    }
-    numOuterParallelLoops++;
-  }
-  return numOuterParallelLoops;
-}
-
 namespace {
 
 /// To be able to use the workgroup size from the dispatch function attribute
@@ -142,10 +129,8 @@ struct IREETileLinalgPass : public FunctionPass<IREETileLinalgPass> {
       return signalPassFailure();
     }
 
-    // TODO(ravishankarm): Tile conv op.
-    bool isConvOp = isa<linalg::ConvOp>(linalgOp.getOperation());
     unsigned numOuterParallelLoops = getNumOuterParallelLoops(linalgOp);
-    if (isConvOp || !numOuterParallelLoops) {
+    if (!numOuterParallelLoops) {
       // There are no outer parallel loops to partition. So just create dummy
       // 1-trip loops that will be "split" across workgroups and workitems.
       builder.setInsertionPoint(linalgOp);
@@ -317,7 +302,7 @@ void addLinalgToSPIRVPasses(OpPassManager &pm,
                             ArrayRef<int64_t> workGroupSize) {
   // Linalg to loops.
   pm.addPass(std::make_unique<UpdateWorkGroupSizePass>(workGroupSize));
-  pm.addPass(std::make_unique<IREETileLinalgPass>());
+  pm.addPass(createLinalgTileAndFusePass());
   pm.addPass(createConvertLinalgToLoopsPass());
   pm.addPass(createLowerAffinePass());
   pm.addPass(createCanonicalizerPass());

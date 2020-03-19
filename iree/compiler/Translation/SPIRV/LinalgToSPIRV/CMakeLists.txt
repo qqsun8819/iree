@@ -20,9 +20,12 @@ iree_cc_library(
   HDRS
     "LowerToSPIRV.h"
     "Passes.h"
+    "Utils.h"
   SRCS
-    "GPUKernelOutlining.cpp"
+    "GPUKernelOutliningPass.cpp"
+    "LinalgTileAndFusePass.cpp"
     "LowerToSPIRV.cpp"
+    "Utils.cpp"
   DEPS
     LLVMSupport
     MLIRAffineOps

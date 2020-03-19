@@ -20,12 +20,15 @@ package(
 cc_library(
     name = "LinalgToSPIRV",
     srcs = [
-        "GPUKernelOutlining.cpp",
+        "GPUKernelOutliningPass.cpp",
+        "LinalgTileAndFusePass.cpp",
         "LowerToSPIRV.cpp",
+        "Utils.cpp",
     ],
     hdrs = [
         "LowerToSPIRV.h",
         "Passes.h",
+        "Utils.h",
     ],
     deps = [
         "//iree/compiler/Dialect/IREE/IR",
