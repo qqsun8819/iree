@@ -1550,6 +1550,39 @@ def HAL_InterfaceStoreTensorOp : HAL_Op<"interface.store.tensor"> {
   }];
 }
 
+def HAL_InterfaceGetMemrefOp : HAL_PureOp<"interface.get_memref"> {
+  let summary = [{Returns a view of the interface as a memref}];
+  let description = [{
+    Gets a view of the executable IO binding as a memref. This is a pseudo op
+    that can be used to treat the binding as memref. The operation does not
+    make a distinction between bindings for input or output, so it is upto the
+    backends to ensure they are treated as such.
+
+    Note that because there may not be a 1:1 mapping between original tensor
+    arguments to the entry point function and the bindings in the interface the
+    backend must use the offset provided on this op to properly compute the base
+    address of the tensor data. The offset is in bytes relative to the base
+    binding address, irrespective of the type of the tensor loaded by this
+    operation.
+
+    The offset provided, if non-zero, will have an alignment compatible with the
+    tensor type represented. For example, a `tensor<16xf32>` will be aligned on
+    at least a 4 byte boundary.
+  }];
+
+  let arguments = (ins
+    SymbolRefAttr:$binding,
+    HAL_DeviceSize:$offset
+  );
+  let results = (outs
+    AnyMemRef:$result
+  );
+
+  let assemblyFormat = [{
+    $binding `,` `offset` `=` $offset attr-dict `:` type($result)
+  }];
+}
+
 //===----------------------------------------------------------------------===//
 // iree::hal::ExecutableCache
 //===----------------------------------------------------------------------===//

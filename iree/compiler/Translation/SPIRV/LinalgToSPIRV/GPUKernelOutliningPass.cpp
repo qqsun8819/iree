@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//===- GPUKernelOutlining.cpp - Generate GPU device-side code -------------===//
+//===- GPUKernelOutliningPass.cpp - Generate GPU device-side code ---------===//
 //
 // Implements a pass to convert a launch operation into a device-side code. Uses
 // a separate pass since the pass from core puts the gpu.module at the module
@@ -65,15 +65,17 @@ LogicalResult ConvertToGPUFuncOp::matchAndRewrite(
   // The arguments of the funcOp must be the arguments of the launchOp, in the
   // same order.
   SmallVector<Value, 4> arguments(funcOp.args_begin(), funcOp.args_end());
+  Optional<StringRef> dispatchFnName = getDispatchFnName(funcOp);
+  if (!dispatchFnName)
+    return launchOp.emitError("unable to get dispatch function name");
   gpu::GPUFuncOp gpuFuncOp =
-      outlineKernelFunc(launchOp, funcOp.getName(), arguments);
+      outlineKernelFunc(launchOp, dispatchFnName.getValue(), arguments);
 
   // Add the SPIR-V ABI attr here since it is needed for the SPIR-V lowering.
   // TODO(ravishankarm/antiagainst) : When there is a mirror of the
   // workgroup-size attribute in GPU dialect use that instead.
+  spirv::EntryPointABIAttr abiAttr = spirv::lookupEntryPointABI(launchOp);
   StringRef abiAttrName = spirv::getEntryPointABIAttrName();
-  auto abiAttr =
-      spirv::getEntryPointABIAttr(workGroupSize, rewriter.getContext());
   gpuFuncOp.setAttr(abiAttrName, abiAttr);
 
   // If any additional arguments are needed, then the launch op cannot be

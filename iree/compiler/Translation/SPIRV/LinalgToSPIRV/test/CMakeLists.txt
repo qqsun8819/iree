@@ -14,33 +14,13 @@
 
 iree_add_all_subdirs()
 
-iree_cc_library(
+file(GLOB _GLOB_X_MLIR CONFIGURE_DEPENDS *.mlir)
+iree_lit_test_suite(
   NAME
-    CodegenPasses
-  HDRS
-    "Passes.h"
+    lit
   SRCS
-    "HALInterfaceToMemrefPass.cpp"
-    "HLOPreprocessing.cpp"
-    "HLOToLinalgOnBuffers.cpp"
-    "HLOToLinalgOnTensors.cpp"
-    "LinalgFusion.cpp"
-    "Passes.cpp"
-  DEPS
-    LLVMSupport
-    MLIRIR
-    MLIRLinalgOps
-    MLIRLinalgTransforms
-    MLIRPass
-    MLIRSPIRV
-    MLIRStandardOps
-    MLIRSupport
-    MLIRTransforms
-    iree::compiler::Dialect::Flow::IR
-    iree::compiler::Dialect::HAL::IR
-    iree::compiler::Dialect::IREE::IR
-    iree::compiler::Translation::CodegenUtils
-    tensorflow::mlir_xla
-  ALWAYSLINK
-  PUBLIC
+    "${_GLOB_X_MLIR}"
+  DATA
+    iree::tools::IreeFileCheck
+    iree::tools::iree-opt
 )
